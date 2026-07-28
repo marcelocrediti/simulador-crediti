@@ -2,8 +2,11 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8" />
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="Pragma" content="no-cache" />
+<meta http-equiv="Expires" content="0" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-<title>Simulador Crediti</title>
+<title>Painel de Simulação · Crediti</title>
 
 <!-- Meta tags para "Adicionar à tela inicial" (iOS e Android) -->
 <meta name="mobile-web-app-capable" content="yes" />
@@ -15,6 +18,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'%3E%3Crect width='180' height='180' rx='36' fill='%230E2A24'/%3E%3Ctext x='90' y='122' font-family='Georgia,serif' font-size='108' font-weight='bold' fill='%23D4A72C' text-anchor='middle'%3EC%3C/text%3E%3C/svg%3E" />
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <style>
   :root{
     --bg:#0E2A24;
@@ -45,6 +49,7 @@
   .toggle{display:flex;background:var(--panel);border:1px solid var(--panel-border);border-radius:999px;padding:4px;}
   .toggle button{border:0;background:transparent;color:#B9C7C2;font-size:14px;font-weight:600;padding:9px 16px;border-radius:999px;cursor:pointer;display:flex;align-items:center;gap:6px;}
   .toggle button.active{background:var(--gold);color:var(--ink);}
+  .toggle button:disabled{opacity:.5;cursor:wait;}
 
   .grid{display:grid;grid-template-columns:1fr;gap:20px;}
   @media(min-width:860px){.grid{grid-template-columns:2fr 3fr;}}
@@ -77,6 +82,22 @@
   .odo-punct{opacity:.7;}
 
   .breakdown{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px;font-size:14px;}
+
+  .tabela-prazos{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-top:6px;}
+  .prazo-row{
+    cursor:pointer;text-align:center;min-width:0;max-width:100%;overflow:hidden;
+    background:var(--panel);border:1px solid var(--panel-border);border-radius:10px;
+    padding:7px 2px;transition:background .15s,border-color .15s;
+  }
+  .prazo-row:hover{border-color:var(--gold);}
+  .prazo-row .prazo-x{display:block;font-size:10px;font-weight:700;color:var(--mist);white-space:nowrap;}
+  .prazo-row .prazo-valor{
+    display:block;width:100%;box-sizing:border-box;font-size:10.5px;font-weight:700;
+    color:var(--cream);margin-top:2px;line-height:1.2;
+    white-space:nowrap;overflow:hidden;text-overflow:clip;
+  }
+  .prazo-row-ativo{background:var(--gold);border-color:var(--gold);}
+  .prazo-row-ativo .prazo-x,.prazo-row-ativo .prazo-valor{color:var(--ink);}
   .bd-item{border-top:1px solid var(--panel-border);padding-top:10px;}
   .bd-label{color:var(--mist);font-size:12px;}
   .bd-value{font-weight:700;font-size:16px;}
@@ -111,21 +132,27 @@
     .toggle{align-self:flex-start;}
     .toggle button{padding:8px 12px;font-size:13px;}
     .result-panel{padding:18px;min-height:auto;}
-    .odometer{font-size:32px;flex-wrap:wrap;}
-    .odo-rs{font-size:16px;}
     .breakdown{grid-template-columns:1fr;gap:12px;}
     .cta-row{flex-direction:column;}
     .cta-row .btn{min-width:0;width:100%;}
     select,input[type=number],input[type=tel],input[type=text],input[type=date]{font-size:16px;} /* evita zoom automático do iOS ao focar */
+    .tabela-prazos{gap:4px;}
+    .prazo-row{padding:6px 1px;}
+    .prazo-row .prazo-x{font-size:9px;}
+    .prazo-row .prazo-valor{font-size:9px;}
+  }
+  @media(max-width:360px){
+    .tabela-prazos{grid-template-columns:repeat(3,minmax(0,1fr));}
   }
 </style>
 </head>
 <body>
+<div id="qr-container" style="position:absolute;left:-9999px;top:-9999px;"></div>
 <div class="wrap">
   <div class="header">
     <div>
       <div class="eyebrow">Crediti Soluções Financeiras</div>
-      <h1>Simulador de financiamento</h1>
+      <h1>Painel de Simulação</h1>
       <div id="data-simulacao" style="font-size:12px;color:var(--mist);margin-top:4px;"></div>
     </div>
     <div class="toggle">
@@ -157,6 +184,7 @@
 
       <div id="loading-msg" class="loading" style="display:none;">Consultando valor FIPE...</div>
       <div id="err-msg" class="err" style="display:none;"></div>
+      <button id="btn-tentar-de-novo" type="button" style="display:none;background:none;border:1px solid var(--alert);color:var(--alert);border-radius:8px;padding:6px 12px;font-size:12px;font-weight:700;cursor:pointer;margin:-8px 0 12px;" onclick="tentarUltimaAcaoDeNovo()">🔄 Tentar de novo</button>
 
       <div id="fipe-box" class="fipe-box" style="display:none;">
         <div class="fipe-model" id="fipe-model"></div>
@@ -172,7 +200,7 @@
       </div>
       <div class="field">
         <label class="field-label">Valor do veículo (R$)</label>
-        <input type="text" inputmode="decimal" id="inp-valor-manual" placeholder="0,00" oninput="maskMoeda(this); recalc()">
+        <input type="text" inputmode="decimal" id="inp-valor-manual" placeholder="0,00" oninput="maskMoeda(this); recalcPerfil();">
         <div class="footnote" style="margin-top:4px;">Preenchido pela FIPE quando disponível. Pode digitar direto, ex: 10.000,00 — ou se a FIPE estiver fora do ar.</div>
       </div>
 
@@ -182,19 +210,60 @@
 
       <div class="field">
         <label class="field-label">Entrada (R$)</label>
-        <input type="text" inputmode="decimal" id="inp-entrada" placeholder="0,00" oninput="maskMoeda(this); recalc()">
+        <input type="text" inputmode="decimal" id="inp-entrada" placeholder="0,00" oninput="maskMoeda(this); recalcPerfil();">
         <div class="footnote" id="lbl-entrada-pct" style="margin-top:4px;">Digite o valor da entrada em reais, ex: 2.000,00</div>
       </div>
+      <hr>
       <div class="field">
-        <label class="field-label">Prazo</label>
-        <select id="sel-prazo" onchange="recalc()">
-          <option value="12">12x</option>
-          <option value="24">24x</option>
-          <option value="36" selected>36x</option>
-          <option value="48">48x</option>
-          <option value="60">60x</option>
+        <label class="field-label">Perfil do cliente (opcional — sem CPF, só pra ajustar a taxa sugerida)</label>
+      </div>
+      <div class="field">
+        <label class="field-label" style="font-weight:400;text-transform:none;font-size:12px;">Tipo de renda</label>
+        <select id="sel-renda" onchange="recalcPerfil()">
+          <option value="0">Selecione</option>
+          <option value="concursado">Concursado (efetivo)</option>
+          <option value="clt">CLT</option>
+          <option value="aposentado">Aposentado / Pensionista</option>
+          <option value="empresario">Empresário</option>
+          <option value="autonomo">Autônomo</option>
         </select>
       </div>
+      <div class="field">
+        <label class="field-label" style="font-weight:400;text-transform:none;font-size:12px;">Tempo no emprego/negócio atual</label>
+        <select id="sel-tempo" onchange="recalcPerfil()">
+          <option value="0">Selecione</option>
+          <option value="mais2">Mais de 2 anos</option>
+          <option value="1a2">De 1 a 2 anos</option>
+          <option value="6a12">De 6 a 12 meses</option>
+          <option value="menos6">Menos de 6 meses</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" style="font-weight:400;text-transform:none;font-size:12px;">Tem outro financiamento em andamento?</label>
+        <select id="sel-outrofin" onchange="recalcPerfil()">
+          <option value="0">Selecione</option>
+          <option value="nao">Não</option>
+          <option value="sim">Sim</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" style="font-weight:400;text-transform:none;font-size:12px;">Faixa etária do cliente</label>
+        <select id="sel-idade" onchange="recalcPerfil()">
+          <option value="0">Selecione</option>
+          <option value="18a21">18 a 21 anos</option>
+          <option value="22mais">22 anos ou mais</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="field-label" style="font-weight:400;text-transform:none;font-size:12px;">Possui CNH?</label>
+        <select id="sel-cnh" onchange="recalcPerfil()">
+          <option value="0">Selecione</option>
+          <option value="sim">Sim</option>
+          <option value="nao">Não (só aprova em bancos específicos, como BV e PAN)</option>
+        </select>
+        <div class="footnote" id="lbl-perfil-sugestao" style="margin-top:4px;">Respostas autodeclaradas pelo cliente. Ajustam a taxa dentro da faixa já validada — nunca abaixo do piso real do BACEN.</div>
+      </div>
+      <hr>
       <div class="field">
         <label class="field-label">Taxa de juros (% a.m.)</label>
         <input type="number" id="inp-taxa" step="0.01" value="3.56" oninput="recalcManualTaxa(); recalc()">
@@ -238,9 +307,11 @@
 
       <div id="result-content" style="display:none;">
         <div class="eyebrow">Parcela estimada</div>
-        <div class="odometer"><span class="odo-rs">R$</span><span id="odometer-digits"></span><span style="font-size:16px;color:var(--mist);margin-left:8px;">/mês</span></div>
         <div id="parcela-sub" style="font-size:13px;color:var(--mist);margin-top:4px;"></div>
         <div id="parcela-datas" style="font-size:13px;color:var(--mist);margin-top:2px;"></div>
+
+        <div id="tabela-prazos-label" style="font-size:10px;color:var(--mist);text-transform:uppercase;letter-spacing:.04em;font-weight:700;margin-top:14px;">Parcela (R$/mês) por prazo</div>
+        <div id="tabela-prazos" class="tabela-prazos"></div>
 
         <div class="breakdown">
           <div class="bd-item"><div class="bd-label">Valor do veículo (FIPE)</div><div class="bd-value" id="bd-veiculo"></div></div>
@@ -278,6 +349,7 @@
 
 <script>
 let tipo = "carros";
+let cargaId = 0; // trava contra condição de corrida: descarta respostas atrasadas de trocas antigas de tipo/marca/modelo
 let fipeInfo = null;
 let valorFipeOriginal = null;
 let cacheMarcas = {};
@@ -330,40 +402,60 @@ const FONTES = [
   }
 ];
 
-// Tenta cada fonte em ordem; se as duas ao vivo falharem, usa a última versão salva no simulador.
+// Sobe esse número sempre que quiser invalidar TODO o cache local antigo de uma vez
+// (ex: depois de corrigir um bug de dados) — os parceiros não precisam limpar nada na mão.
+const CACHE_VERSAO = "v2";
+
+// Tenta cada fonte em ordem; se as duas ao vivo falharem (inclusive por estar offline),
+// usa a última versão salva no navegador do próprio parceiro.
+// Por convenção, o 1º argumento de todo método das FONTES é sempre o tipo (carros/motos) —
+// a chave de cache usa ESSE valor explícito, nunca a variável global "tipo", pra nunca
+// correr o risco de misturar dado de carro com o de moto.
+//
+// Cada fonte ganha até 3 tentativas (com pequena pausa entre elas) antes de passar pra
+// próxima — isso resolve instabilidades passageiras da FIPE sem precisar ficar consultando
+// o tempo todo em segundo plano (o que só sobrecarregaria a própria FIPE).
+function esperar(ms){ return new Promise(res=>setTimeout(res, ms)); }
+
 async function comFallback(metodo, ...args){
-  const chaveCache = ["fipecache", metodo, tipo, ...args].join(":");
+  const tipoChave = args[0];
+  const chaveCache = ["fipecache", CACHE_VERSAO, metodo, tipoChave, ...args.slice(1)].join(":");
   let ultimoErro;
   for(const fonte of FONTES){
-    try{
-      const resultado = await fonte[metodo](...args);
-      setFonteAtiva(fonte.nome);
-      salvarCache(chaveCache, resultado); // grava em segundo plano, não bloqueia a tela
-      return resultado;
-    }catch(e){
-      ultimoErro = e;
-      // segue silenciosamente pra próxima fonte
+    for(let tentativa=1; tentativa<=3; tentativa++){
+      try{
+        const resultado = await fonte[metodo](...args);
+        setFonteAtiva(fonte.nome);
+        salvarCache(chaveCache, resultado); // grava localmente, não bloqueia a tela
+        return resultado;
+      }catch(e){
+        ultimoErro = e;
+        if(tentativa < 3) await esperar(700 * tentativa); // espera um pouco mais a cada nova tentativa
+      }
     }
+    // essa fonte falhou 3 vezes seguidas — segue silenciosamente pra próxima
   }
-  const salvo = await lerCache(chaveCache);
+  const salvo = lerCache(chaveCache);
   if(salvo){
-    setFonteAtiva("dados salvos no simulador", salvo.atualizadoEm);
+    setFonteAtiva("dados salvos neste dispositivo (offline)", salvo.atualizadoEm);
     return salvo.valor;
   }
-  throw ultimoErro || new Error("Todas as fontes falharam e não há nada salvo ainda para essa consulta.");
+  throw ultimoErro || new Error("Sem internet e ainda não há nada salvo neste dispositivo para essa consulta.");
 }
 
-async function salvarCache(chave, valor){
+// localStorage é a memória permanente do PRÓPRIO NAVEGADOR do parceiro — sobrevive a
+// fechar o app, reiniciar o celular, e funciona sem internet nenhuma depois da 1ª vez.
+function salvarCache(chave, valor){
   try{
-    await window.storage.set(chave, JSON.stringify({ valor, atualizadoEm: new Date().toISOString() }), true);
-  }catch(e){ /* cache indisponível, ignora silenciosamente */ }
+    localStorage.setItem(chave, JSON.stringify({ valor, atualizadoEm: new Date().toISOString() }));
+  }catch(e){ /* armazenamento cheio ou bloqueado pelo navegador — ignora silenciosamente */ }
 }
 
-async function lerCache(chave){
+function lerCache(chave){
   try{
-    const r = await window.storage.get(chave, true);
-    if(!r) return null;
-    return JSON.parse(r.value);
+    const bruto = localStorage.getItem(chave);
+    if(!bruto) return null;
+    return JSON.parse(bruto);
   }catch(e){ return null; }
 }
 
@@ -376,10 +468,73 @@ function recalcManualAvaliacao(){ avaliacaoManual = true; }
 function recalcManualTaxa(){ taxaManual = true; }
 function recalcManualSeguro(){ seguroManual = true; }
 
+function baseTaxa(){ return tipo==="carros" ? 3.56 : 3.25; }
+function limitesTaxa(){ return tipo==="carros" ? {min:2.27, max:3.56} : {min:2.92, max:3.25}; }
+
+// Cada fator vira uma pontuação de 0 (melhor perfil) a 1 (perfil mais arriscado).
+// A taxa final é piso + pontuação_média × (teto - piso) — sempre dentro da faixa real validada.
+function recalcPerfil(){
+  const renda = $("sel-renda").value;
+  const tempo = $("sel-tempo").value;
+  const outro = $("sel-outrofin").value;
+  const idade = $("sel-idade").value;
+  const cnh = $("sel-cnh").value;
+
+  const pontos = [];
+
+  if(renda!=="0"){
+    const mapa = { concursado:0, clt:0, aposentado:0, empresario:0.3, autonomo:1 };
+    pontos.push(mapa[renda]);
+  }
+  if(tempo!=="0"){
+    const mapa = { mais2:0, "1a2":0.4, "6a12":0.7, menos6:1 };
+    pontos.push(mapa[tempo]);
+  }
+  if(outro!=="0"){
+    pontos.push(outro==="sim" ? 1 : 0);
+  }
+  if(idade!=="0"){
+    pontos.push(idade==="18a21" ? 1 : 0);
+  }
+  if(cnh!=="0"){
+    pontos.push(cnh==="nao" ? 1 : 0);
+  }
+
+  const valorVeiculo = parseMoeda($("inp-valor-manual").value);
+  const valorEntrada = parseMoeda($("inp-entrada").value);
+  if(valorVeiculo > 0){
+    const entradaPct = valorEntrada/valorVeiculo*100;
+    let pontoEntrada;
+    if(entradaPct >= 40) pontoEntrada = 0;
+    else if(entradaPct <= 10) pontoEntrada = 1;
+    else pontoEntrada = (40 - entradaPct) / 30;
+    pontos.push(pontoEntrada);
+  }
+
+  const lim = limitesTaxa();
+  const algumaResposta = renda!=="0" || tempo!=="0" || outro!=="0" || idade!=="0" || cnh!=="0";
+
+  if(algumaResposta && pontos.length>0){
+    const pontuacaoMedia = pontos.reduce((a,b)=>a+b,0) / pontos.length;
+    let sugerida = lim.min + pontuacaoMedia * (lim.max - lim.min);
+    sugerida = Math.round(sugerida*100)/100;
+    $("lbl-perfil-sugestao").textContent = `Taxa sugerida com base no perfil: ${sugerida.toFixed(2)}% a.m. (faixa validada: ${lim.min.toFixed(2)}%–${lim.max.toFixed(2)}% — ajustável abaixo).`;
+    if(!taxaManual){
+      $("inp-taxa").value = sugerida;
+    }
+  } else {
+    $("lbl-perfil-sugestao").textContent = `Respostas autodeclaradas pelo cliente. Ajustam a taxa dentro da faixa já validada (${lim.min.toFixed(2)}%–${lim.max.toFixed(2)}% a.m.) — nunca abaixo do piso real do BACEN.`;
+  }
+  recalc();
+}
+
 function setTipo(t){
+  if(t===tipo && ($("sel-marca").options.length>1)) return; // já está nesse tipo com marcas carregadas, ignora clique repetido
   tipo = t;
   $("btn-carro").classList.toggle("active", t==="carros");
   $("btn-moto").classList.toggle("active", t==="motos");
+  $("btn-carro").disabled = true; // trava física: ninguém troca de tipo até essa busca terminar
+  $("btn-moto").disabled = true;
   if(!registroManual){
     $("inp-registro").value = t==="carros" ? 781.04 : 415.71;
   }
@@ -394,6 +549,7 @@ function setTipo(t){
   }
   resetSelects();
   loadMarcas();
+  recalcPerfil();
 }
 
 function resetPainelResultado(){
@@ -417,18 +573,48 @@ function resetSelects(){
   hideErr();
 }
 
-function showErr(msg){ $("err-msg").style.display="block"; $("err-msg").textContent = msg; }
-function hideErr(){ $("err-msg").style.display="none"; }
+let ultimaAcaoFalha = null;
+function showErr(msg, acaoRetentar){
+  $("err-msg").style.display="block"; $("err-msg").textContent = msg;
+  ultimaAcaoFalha = acaoRetentar || null;
+  $("btn-tentar-de-novo").style.display = ultimaAcaoFalha ? "inline-block" : "none";
+}
+function hideErr(){
+  $("err-msg").style.display="none";
+  $("btn-tentar-de-novo").style.display="none";
+}
+function tentarUltimaAcaoDeNovo(){
+  const acao = ultimaAcaoFalha;
+  hideErr();
+  if(acao) acao();
+}
 
 function loadMarcas(){
-  const key = "marcas-"+tipo;
-  if(cacheMarcas[key]){ fillMarcas(cacheMarcas[key]); return; }
+  const tipoSolicitado = tipo;
+  const minhaCarga = ++cargaId;
+  const key = "marcas-"+tipoSolicitado;
+  if(cacheMarcas[key]){
+    fillMarcas(cacheMarcas[key]);
+    liberarBotoesTipo();
+    return;
+  }
   $("loading-msg").style.display="block"; $("loading-msg").textContent="Carregando marcas...";
-  comFallback("marcas", tipo).then(data=>{
+  comFallback("marcas", tipoSolicitado).then(data=>{
     cacheMarcas[key] = data;
+    if(minhaCarga !== cargaId) return; // usuário já trocou de tipo/marca — descarta resposta atrasada
     fillMarcas(data);
-  }).catch(()=>showErr("A FIPE está indisponível e ainda não há marcas salvas no simulador. Tenta de novo em instantes."))
-  .finally(()=>{ $("loading-msg").style.display="none"; });
+  }).catch(()=>{ if(minhaCarga===cargaId) showErr("A FIPE está indisponível e ainda não há marcas salvas no simulador. Tenta de novo em instantes.", loadMarcas); })
+  .finally(()=>{
+    if(minhaCarga===cargaId){
+      $("loading-msg").style.display="none";
+      liberarBotoesTipo();
+    }
+  });
+}
+
+function liberarBotoesTipo(){
+  $("btn-carro").disabled = false;
+  $("btn-moto").disabled = false;
 }
 
 function fillMarcas(data){
@@ -443,13 +629,16 @@ function fillMarcas(data){
 
 function onMarcaChange(codigo){
   hideErr();
+  const minhaCarga = ++cargaId;
   $("sel-modelo").innerHTML = '<option value="">Selecione o modelo</option>';
   $("sel-ano").innerHTML = '<option value="">Selecione o ano</option>';
   $("sel-ano").disabled = true;
   resetPainelResultado();
   if(!codigo){ $("sel-modelo").disabled = true; return; }
+  const tipoSolicitado = tipo;
   $("loading-msg").style.display="block"; $("loading-msg").textContent="Carregando modelos...";
-  comFallback("modelos", tipo, codigo).then(data=>{
+  comFallback("modelos", tipoSolicitado, codigo).then(data=>{
+    if(minhaCarga !== cargaId) return; // trocou de marca/tipo antes da resposta chegar — descarta
     const sel = $("sel-modelo");
     sel.innerHTML = '<option value="">Selecione o modelo</option>';
     data.forEach(m=>{
@@ -458,18 +647,21 @@ function onMarcaChange(codigo){
       sel.appendChild(opt);
     });
     sel.disabled = false;
-  }).catch(()=>showErr("A FIPE está indisponível e ainda não há modelos salvos pra essa marca."))
-  .finally(()=>{ $("loading-msg").style.display="none"; });
+  }).catch(()=>{ if(minhaCarga===cargaId) showErr("A FIPE está indisponível e ainda não há modelos salvos pra essa marca.", ()=>onMarcaChange(codigo)); })
+  .finally(()=>{ if(minhaCarga===cargaId) $("loading-msg").style.display="none"; });
 }
 
 function onModeloChange(codigo){
   hideErr();
+  const minhaCarga = ++cargaId;
   $("sel-ano").innerHTML = '<option value="">Selecione o ano</option>';
   resetPainelResultado();
   const marcaCodigo = $("sel-marca").value;
   if(!codigo){ $("sel-ano").disabled = true; return; }
+  const tipoSolicitado = tipo;
   $("loading-msg").style.display="block"; $("loading-msg").textContent="Carregando anos...";
-  comFallback("anos", tipo, marcaCodigo, codigo).then(data=>{
+  comFallback("anos", tipoSolicitado, marcaCodigo, codigo).then(data=>{
+    if(minhaCarga !== cargaId) return; // trocou de modelo/marca/tipo antes da resposta chegar — descarta
     const sel = $("sel-ano");
     sel.innerHTML = '<option value="">Selecione o ano</option>';
     data.forEach(a=>{
@@ -478,8 +670,8 @@ function onModeloChange(codigo){
       sel.appendChild(opt);
     });
     sel.disabled = false;
-  }).catch(()=>showErr("A FIPE está indisponível e ainda não há anos salvos pra esse modelo."))
-  .finally(()=>{ $("loading-msg").style.display="none"; });
+  }).catch(()=>{ if(minhaCarga===cargaId) showErr("A FIPE está indisponível e ainda não há anos salvos pra esse modelo.", ()=>onModeloChange(codigo)); })
+  .finally(()=>{ if(minhaCarga===cargaId) $("loading-msg").style.display="none"; });
 }
 
 /* ============================================================================
@@ -544,13 +736,16 @@ function onFabricacaoChange(){
 
 function onAnoChange(codigo){
   hideErr();
+  const minhaCarga = ++cargaId;
   fipeInfo = null;
   $("fipe-box").style.display="none";
   if(!codigo) return;
   const marcaCodigo = $("sel-marca").value;
   const modeloCodigo = $("sel-modelo").value;
+  const tipoSolicitado = tipo;
   $("loading-msg").style.display="block"; $("loading-msg").textContent="Consultando valor FIPE...";
-  comFallback("valor", tipo, marcaCodigo, modeloCodigo, codigo).then(data=>{
+  comFallback("valor", tipoSolicitado, marcaCodigo, modeloCodigo, codigo).then(data=>{
+    if(minhaCarga !== cargaId) return; // trocou de ano/modelo/marca/tipo antes da resposta chegar — descarta
     fipeInfo = data;
     valorFipeOriginal = parseFipeValue(data.Valor);
     $("fipe-model").textContent = data.Modelo;
@@ -574,8 +769,8 @@ function onAnoChange(codigo){
     $("inp-primeira-parcela").value = padrao.toISOString().slice(0,10);
 
     recalc();
-  }).catch(()=>showErr("A FIPE está indisponível e ainda não há valor salvo pra esse veículo."))
-  .finally(()=>{ $("loading-msg").style.display="none"; });
+  }).catch(()=>{ if(minhaCarga===cargaId) showErr("A FIPE está indisponível e ainda não há valor salvo pra esse veículo.", ()=>onAnoChange(codigo)); })
+  .finally(()=>{ if(minhaCarga===cargaId) $("loading-msg").style.display="none"; });
 }
 
 function parseFipeValue(str){
@@ -642,10 +837,14 @@ function calcularClick(){
   recalc();
 }
 
-function recalc(){
+const PRAZOS_DISPONIVEIS = [12,24,36,48,60];
+let prazoSelecionado = 36;
+
+// Calcula o financiamento completo pra um prazo específico, mantendo os outros campos
+// do formulário fixos. Reaproveitada tanto pela tabela comparativa quanto pelo recalc().
+function calcularFinanciamento(prazo){
   const valorVeiculo = parseMoeda($("inp-valor-manual").value);
   const valorEntradaDigitado = parseMoeda($("inp-entrada").value);
-  const prazo = Number($("sel-prazo").value);
   const taxa = Number($("inp-taxa").value);
   const tac = Number($("inp-tac").value)||0;
   const registro = Number($("inp-registro").value)||0;
@@ -653,22 +852,11 @@ function recalc(){
   const avaliacao = Number($("inp-avaliacao").value)||0;
   const usado = $("chk-usado").checked;
 
-  const entradaPct = valorVeiculo > 0 ? (valorEntradaDigitado/valorVeiculo*100) : 0;
-  $("lbl-entrada-pct").textContent = valorVeiculo > 0
-    ? `Equivale a ${entradaPct.toFixed(1)}% do valor do veículo.`
-    : "Digite o valor da entrada em reais, ex: 2.000,00";
-  
-  if(!calculado) return; // só atualiza o painel de resultado depois de tocar em "Calcular"
-
-  // A entrada nunca pode passar do valor do veículo — o que sobra é o que entra no financiamento.
   const valorEntrada = Math.min(valorEntradaDigitado, valorVeiculo);
   const principal = Math.max(valorVeiculo - valorEntrada, 0);
-
-  // Base real de cálculo: valor solicitado + retorno interno (não exibido em tela, PDF ou WhatsApp).
   const baseCalculo = principal > 0 ? principal + RETORNO_VENDEDOR : 0;
 
-  // Taxas e tarifas incidem sobre a base de cálculo (principal + retorno), nunca sobre a entrada.
-  // IOF pessoa física: 0,38% fixo + 0,0082%/dia (max 365 dias)
+  // IOF pessoa física: 0,38% fixo + 0,0082%/dia (max 365 dias) — varia com o prazo
   const prazoDias = Math.min(prazo*30, 365);
   const iof = baseCalculo*0.0038 + baseCalculo*0.000082*prazoDias;
 
@@ -682,65 +870,106 @@ function recalc(){
   const totalPago = parcela*prazo;
   const totalJuros = totalPago - valorFinanciado;
 
-  // Datas de vencimento: 1ª parcela vem do campo (padrão hoje + 30 dias), demais mensal a partir dela
-  let dataPrimeira = $("inp-primeira-parcela").value ? new Date($("inp-primeira-parcela").value + "T12:00:00") : addMonths(new Date(), 1);
-  const dataUltima = addMonths(dataPrimeira, prazo-1);
-
-  $("row-avaliacao").style.display = usado ? "flex" : "none";
-
-  $("bd-veiculo").textContent = formatBRL(valorVeiculo);
-  $("bd-entrada").textContent = formatBRL(valorEntrada);
-  $("bd-custos").textContent = formatBRL(custosAdicionais);
-  $("bd-financiado").textContent = formatBRL(principal);
-  $("bd-juros").textContent = formatBRL(totalJuros);
-  $("bd-total").textContent = formatBRL(totalPago);
-
-  $("c-tac").textContent = formatBRL(tac);
-  $("c-iof").textContent = formatBRL(iof);
-  $("c-registro").textContent = formatBRL(registro);
-  $("c-seguro").textContent = formatBRL(seguro);
-  $("c-avaliacao").textContent = formatBRL(avaliacaoValor);
-
-  $("parcela-sub").textContent = `em ${prazo}x com taxa de ${taxa}% a.m.`;
-  $("parcela-datas").textContent = `1ª parcela em ${formatDataBR(dataPrimeira)} · última em ${formatDataBR(dataUltima)}`;
-
-  renderOdometer(formatNum(parcela));
-
-  const anoFabricacao = $("inp-fabricacao").value || "-";
-  const descricao = $("inp-descricao").value || "Veículo";
-  const veiculo = fipeInfo || { Marca:"", Modelo:descricao, AnoModelo:anoFabricacao, Combustivel:"-", MesReferencia:"-" };
-
-  lastCalc = {
-    veiculo, valorVeiculo, entradaPct, valorEntrada, principal, prazo, taxa,
-    tac, iof, registro, seguro, avaliacaoValor, custosAdicionais,
-    valorFinanciado, parcela, totalPago, totalJuros, usado, anoFabricacao,
-    dataPrimeira, dataUltima
+  return {
+    valorVeiculo, valorEntrada, principal, baseCalculo, taxa, tac, registro,
+    seguro, avaliacaoValor, iof, custosAdicionais, valorFinanciado, parcela,
+    totalPago, totalJuros, usado, prazo
   };
 }
 
-function renderOdometer(valueStr){
-  const container = $("odometer-digits");
-  container.innerHTML = "";
-  for(const ch of valueStr){
-    if(/\d/.test(ch)){
-      const digit = document.createElement("span");
-      digit.className = "odo-digit";
-      const col = document.createElement("div");
-      col.className = "col";
-      for(let i=0;i<10;i++){
-        const d = document.createElement("div");
-        d.textContent = i;
-        col.appendChild(d);
-      }
-      digit.appendChild(col);
-      container.appendChild(digit);
-      requestAnimationFrame(()=>{ col.style.transform = `translateY(-${Number(ch)*10}%)`; });
-    } else {
-      const span = document.createElement("span");
-      span.className = "odo-punct";
-      span.textContent = ch;
-      container.appendChild(span);
+function selecionarPrazo(p){
+  prazoSelecionado = p;
+  recalc();
+}
+
+// Mostra a parcela dos 5 prazos lado a lado, pra comparar tudo de uma vez sem precisar
+// recalcular manualmente prazo por prazo. Clicar numa linha troca o prazo selecionado.
+function renderTabelaPrazos(){
+  const valorVeiculo = parseMoeda($("inp-valor-manual").value);
+  const cont = $("tabela-prazos");
+  if(!cont) return;
+  cont.innerHTML = "";
+  PRAZOS_DISPONIVEIS.forEach(p=>{
+    const r = calcularFinanciamento(p);
+    const linha = document.createElement("div");
+    linha.className = "prazo-row" + (p===prazoSelecionado ? " prazo-row-ativo" : "");
+    linha.onclick = ()=>selecionarPrazo(p);
+    linha.innerHTML = `<span class="prazo-x">${p}x</span><span class="prazo-valor">${valorVeiculo>0 ? formatNum(r.parcela) : "—"}</span>`;
+    cont.appendChild(linha);
+  });
+  // Espera o navegador desenhar os retângulos de verdade, depois mede cada número
+  // e diminui a fonte até caber por inteiro dentro da borda — sem nunca vazar.
+  requestAnimationFrame(ajustarFontesPrazos);
+}
+
+// Encolhe a fonte de cada valor até o texto caber 100% dentro do retângulo que o contém,
+// medindo pixel a pixel (funciona em qualquer tamanho de tela ou de número, sem exceção).
+function ajustarFontesPrazos(){
+  document.querySelectorAll("#tabela-prazos .prazo-valor").forEach(valorEl=>{
+    let tamanho = 13; // px — ponto de partida, maior que qualquer tamanho definido no CSS
+    valorEl.style.fontSize = tamanho + "px";
+    let tentativas = 0;
+    while(valorEl.scrollWidth > valorEl.clientWidth + 0.5 && tamanho > 6.5 && tentativas < 24){
+      tamanho -= 0.4;
+      valorEl.style.fontSize = tamanho + "px";
+      tentativas++;
     }
+  });
+}
+
+function recalc(){
+  const valorVeiculo = parseMoeda($("inp-valor-manual").value);
+  const valorEntradaDigitado = parseMoeda($("inp-entrada").value);
+  const entradaPct = valorVeiculo > 0 ? (valorEntradaDigitado/valorVeiculo*100) : 0;
+  $("lbl-entrada-pct").textContent = valorVeiculo > 0
+    ? `Equivale a ${entradaPct.toFixed(1)}% do valor do veículo.`
+    : "Digite o valor da entrada em reais, ex: 2.000,00";
+
+  if(!calculado) return; // só atualiza o painel de resultado depois de tocar em "Calcular"
+
+  renderTabelaPrazos();
+
+  try{
+    const r = calcularFinanciamento(prazoSelecionado);
+    const { valorVeiculo:vv, valorEntrada, principal, custosAdicionais, valorFinanciado,
+            parcela, totalPago, totalJuros, usado, taxa, tac, registro, seguro,
+            avaliacaoValor, prazo } = r;
+
+    // Datas de vencimento: 1ª parcela vem do campo (padrão hoje + 30 dias), demais mensal a partir dela
+    let dataPrimeira = $("inp-primeira-parcela").value ? new Date($("inp-primeira-parcela").value + "T12:00:00") : addMonths(new Date(), 1);
+    const dataUltima = addMonths(dataPrimeira, prazo-1);
+
+    $("row-avaliacao").style.display = usado ? "flex" : "none";
+
+    $("bd-veiculo").textContent = formatBRL(vv);
+    $("bd-entrada").textContent = formatBRL(valorEntrada);
+    $("bd-custos").textContent = formatBRL(custosAdicionais);
+    $("bd-financiado").textContent = formatBRL(principal);
+    $("bd-juros").textContent = formatBRL(totalJuros);
+    $("bd-total").textContent = formatBRL(totalPago);
+
+    $("c-tac").textContent = formatBRL(tac);
+    $("c-iof").textContent = formatBRL(r.iof);
+    $("c-registro").textContent = formatBRL(registro);
+    $("c-seguro").textContent = formatBRL(seguro);
+    $("c-avaliacao").textContent = formatBRL(avaliacaoValor);
+
+    $("parcela-sub").textContent = `em ${prazo}x com taxa de ${taxa}% a.m.`;
+    $("parcela-datas").textContent = `1ª parcela em ${formatDataBR(dataPrimeira)} · última em ${formatDataBR(dataUltima)}`;
+
+    const anoFabricacao = $("inp-fabricacao").value || "-";
+    const descricao = $("inp-descricao").value || "Veículo";
+    const veiculo = fipeInfo || { Marca:"", Modelo:descricao, AnoModelo:anoFabricacao, Combustivel:"-", MesReferencia:"-" };
+
+    lastCalc = {
+      veiculo, valorVeiculo: vv, entradaPct, valorEntrada, principal, prazo, taxa,
+      tac, iof: r.iof, registro, seguro, avaliacaoValor, custosAdicionais,
+      valorFinanciado, parcela, totalPago, totalJuros, usado, anoFabricacao,
+      dataPrimeira, dataUltima
+    };
+  }catch(erro){
+    console.error("Erro ao calcular o detalhamento:", erro);
+    showErr("Deu um erro ao calcular os detalhes (" + (erro && erro.message ? erro.message : "erro desconhecido") + "). Me manda esse texto que eu corrijo.");
   }
 }
 
@@ -775,60 +1004,104 @@ function fraseMotivacionalAleatoria(){
   return FRASES_MOTIVACIONAIS[Math.floor(Math.random()*FRASES_MOTIVACIONAIS.length)];
 }
 
+// Gera o QR code do WhatsApp da Crediti como imagem, pronta pra embutir no PDF.
+// Se a biblioteca não carregar (ex: sem internet no momento), retorna null e o PDF
+// segue sem o QR, sem quebrar a geração.
+function gerarQRCodeDataURL(texto){
+  try{
+    const cont = document.getElementById("qr-container");
+    cont.innerHTML = "";
+    new QRCode(cont, {
+      text: texto, width: 240, height: 240,
+      colorDark: "#0E2A24", colorLight: "#FFFFFF",
+      correctLevel: QRCode.CorrectLevel.M
+    });
+    const canvas = cont.querySelector("canvas");
+    if(canvas) return canvas.toDataURL("image/png");
+    const img = cont.querySelector("img");
+    return img ? img.src : null;
+  }catch(e){ return null; }
+}
+
 function gerarPDF(){
-  if(!lastCalc) return;
-  const { jsPDF } = window.jspdf;
-  const doc = new jsPDF();
-  const c = lastCalc;
-  let y = 24;
+  if(!lastCalc){
+    showErr("Calcula o financiamento primeiro (toque em \"Calcular financiamento\") antes de gerar o PDF.");
+    return;
+  }
+  try{
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const c = lastCalc;
+    let y = 24;
 
-  doc.setFont("helvetica","bold"); doc.setFontSize(16);
-  doc.text("Crediti Soluções Financeiras", 14, y); y+=8;
-  doc.setFontSize(12); doc.setFont("helvetica","normal");
-  doc.text("Simulação de financiamento de veículo", 14, y); y+=12;
+    doc.setFont("helvetica","bold"); doc.setFontSize(16);
+    doc.text("Crediti Soluções Financeiras", 14, y); y+=8;
+    doc.setFontSize(12); doc.setFont("helvetica","normal");
+    doc.text("Simulação de financiamento de veículo", 14, y); y+=12;
 
-  doc.setDrawColor(210,210,210); doc.line(14,y,196,y); y+=10;
+    doc.setDrawColor(210,210,210); doc.line(14,y,196,y); y+=10;
 
-  doc.setFont("helvetica","bold"); doc.setFontSize(13);
-  doc.text(nomeVeiculo(c), 14, y); y+=10;
+    doc.setFont("helvetica","bold"); doc.setFontSize(13);
+    doc.text(nomeVeiculo(c), 14, y); y+=10;
 
-  doc.setFont("helvetica","normal"); doc.setFontSize(12);
-  doc.text(`Valor do veículo: ${formatBRL(c.valorVeiculo)}`, 14, y); y+=8;
-  doc.text(`Entrada: ${formatBRL(c.valorEntrada)}`, 14, y); y+=8;
-  doc.text(`Valor financiado: ${formatBRL(c.principal)}`, 14, y); y+=8;
-  doc.text(`Prazo: ${c.prazo}x`, 14, y); y+=8;
-  doc.text(`Vencimento da 1ª parcela: ${formatDataBR(c.dataPrimeira)}`, 14, y); y+=8;
-  doc.text(`Vencimento da última parcela: ${formatDataBR(c.dataUltima)}`, 14, y); y+=12;
+    doc.setFont("helvetica","normal"); doc.setFontSize(12);
+    doc.text(`Valor do veículo: ${formatBRL(c.valorVeiculo)}`, 14, y); y+=8;
+    doc.text(`Entrada: ${formatBRL(c.valorEntrada)}`, 14, y); y+=8;
+    doc.text(`Valor financiado: ${formatBRL(c.principal)}`, 14, y); y+=8;
+    doc.text(`Prazo: ${c.prazo}x`, 14, y); y+=8;
+    doc.text(`Vencimento da 1ª parcela: ${formatDataBR(c.dataPrimeira)}`, 14, y); y+=8;
+    doc.text(`Vencimento da última parcela: ${formatDataBR(c.dataUltima)}`, 14, y); y+=12;
 
-  doc.setDrawColor(210,210,210); doc.line(14,y,196,y); y+=10;
+    doc.setDrawColor(210,210,210); doc.line(14,y,196,y); y+=10;
 
-  doc.setFont("helvetica","bold"); doc.setFontSize(18);
-  doc.text(`Parcela: ${formatBRL(c.parcela)} /mês`, 14, y); y+=14;
+    doc.setFont("helvetica","bold"); doc.setFontSize(18);
+    doc.text(`Parcela: ${formatBRL(c.parcela)} /mês`, 14, y); y+=14;
 
-  doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
-  const dataSimulacao = formatDataBR(new Date());
-  const aviso = `Simulação meramente ilustrativa, válida apenas para o dia ${dataSimulacao}. Em outra data, os valores podem ser diferentes. Crédito sujeito à análise de crédito.`;
-  doc.text(doc.splitTextToSize(aviso, 182), 14, y);
-  y += 16;
+    doc.setFont("helvetica","normal"); doc.setFontSize(9); doc.setTextColor(120,120,120);
+    const dataSimulacao = formatDataBR(new Date());
+    const aviso = `Simulação meramente ilustrativa, válida apenas para o dia ${dataSimulacao}. Em outra data, os valores podem ser diferentes. Crédito sujeito à análise de crédito.`;
+    doc.text(doc.splitTextToSize(aviso, 182), 14, y);
+    y += 16;
 
-  // Frase motivacional, sorteada a cada PDF gerado
-  doc.setFont("helvetica","bolditalic"); doc.setFontSize(11); doc.setTextColor(150,105,10);
-  const frase = `"${fraseMotivacionalAleatoria()}"`;
-  const fraseLinhas = doc.splitTextToSize(frase, 182);
-  doc.text(fraseLinhas, 14, y);
-  y += fraseLinhas.length*6 + 6;
+    // Frase motivacional, sorteada a cada PDF gerado
+    doc.setFont("helvetica","bolditalic"); doc.setFontSize(11); doc.setTextColor(150,105,10);
+    const frase = `"${fraseMotivacionalAleatoria()}"`;
+    const fraseLinhas = doc.splitTextToSize(frase, 182);
+    doc.text(fraseLinhas, 14, y);
+    y += fraseLinhas.length*6 + 12;
 
-  doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(14,42,36);
-  doc.text("Chama no WhatsApp (85) 99203-2558 e simule com a gente!", 14, y);
-  y += 12;
+    // Linha divisória, pra separar visualmente a frase do bloco de contato/QR code
+    doc.setDrawColor(225,225,225); doc.line(14, y, 196, y);
+    y += 14;
 
-  // Rodapé com endereço da Crediti
-  doc.setDrawColor(210,210,210); doc.line(14,y,196,y); y+=6;
-  doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(140,140,140);
-  doc.text("Crediti Soluções Financeiras", 14, y); y+=4;
-  doc.text("Rua Dom Aureliano Matos, 1741, Loja A, Centro, Itapajé - Ceará", 14, y);
+    doc.setFont("helvetica","bold"); doc.setFontSize(11); doc.setTextColor(14,42,36);
+    const linhasWpp = doc.splitTextToSize("Chama no WhatsApp (85) 99203-2558 e simule com a gente!", 125);
+    doc.text(linhasWpp, 14, y);
 
-  salvarOuCompartilharPDF(doc, `simulacao-${c.veiculo.Modelo.replace(/\s+/g,"-")}.pdf`);
+    let qrDataUrl = null;
+    try{ qrDataUrl = gerarQRCodeDataURL("https://wa.me/5585992032558"); }catch(e){ qrDataUrl = null; }
+    const tamanhoQr = 26;
+    if(qrDataUrl){
+      try{
+        const qrY = y - 6; // alinhado ao texto ao lado, com folga já garantida pela linha divisória acima
+        doc.addImage(qrDataUrl, "PNG", 155, qrY, tamanhoQr, tamanhoQr);
+        doc.setFont("helvetica","normal"); doc.setFontSize(7.5); doc.setTextColor(150,105,10);
+        doc.text("Aponte a câmera aqui", 155, qrY + tamanhoQr + 5);
+      }catch(e){ /* alguma incompatibilidade ao inserir o QR — segue sem ele, não trava o PDF */ }
+    }
+    y += Math.max(linhasWpp.length*6, tamanhoQr + 6) + 14;
+
+    // Rodapé com endereço da Crediti
+    doc.setDrawColor(210,210,210); doc.line(14,y,196,y); y+=6;
+    doc.setFont("helvetica","normal"); doc.setFontSize(8); doc.setTextColor(140,140,140);
+    doc.text("Crediti Soluções Financeiras", 14, y); y+=4;
+    doc.text("Rua Dom Aureliano Matos, 1741, Loja A, Centro, Itapajé - Ceará", 14, y);
+
+    salvarOuCompartilharPDF(doc, `simulacao-${c.veiculo.Modelo.replace(/\s+/g,"-")}.pdf`);
+  }catch(erro){
+    console.error("Erro ao gerar PDF:", erro);
+    showErr("Não consegui gerar o PDF agora (" + (erro && erro.message ? erro.message : "erro desconhecido") + "). Tenta de novo, e se persistir, me avisa o que aparece aqui.");
+  }
 }
 
 // Tenta abrir o PDF direto numa nova aba em qualquer dispositivo (computador ou celular).
@@ -860,11 +1133,15 @@ async function salvarOuCompartilharPDF(doc, fileName){
 }
 
 function enviarWhatsApp(){
-  if(!lastCalc) return;
-  const c = lastCalc;
-  const dataSimulacao = formatDataBR(new Date());
-  const frase = fraseMotivacionalAleatoria();
-  const texto =
+  if(!lastCalc){
+    showErr("Calcula o financiamento primeiro (toque em \"Calcular financiamento\") antes de enviar por WhatsApp.");
+    return;
+  }
+  try{
+    const c = lastCalc;
+    const dataSimulacao = formatDataBR(new Date());
+    const frase = fraseMotivacionalAleatoria();
+    const texto =
 `*Crediti Soluções Financeiras*
 Simulação de financiamento
 
@@ -886,9 +1163,13 @@ Simulação meramente ilustrativa, válida apenas para o dia ${dataSimulacao}. E
 
 📍 Rua Dom Aureliano Matos, 1741, Loja A, Centro, Itapajé - Ceará`;
 
-  const telefone = $("inp-telefone").value.replace(/\D/g,"");
-  const base = telefone ? `https://wa.me/55${telefone}` : `https://wa.me/`;
-  window.open(`${base}?text=${encodeURIComponent(texto)}`, "_blank");
+    const telefone = $("inp-telefone").value.replace(/\D/g,"");
+    const base = telefone ? `https://wa.me/55${telefone}` : `https://wa.me/`;
+    window.open(`${base}?text=${encodeURIComponent(texto)}`, "_blank");
+  }catch(erro){
+    console.error("Erro ao montar mensagem de WhatsApp:", erro);
+    showErr("Não consegui montar a mensagem de WhatsApp (" + (erro && erro.message ? erro.message : "erro desconhecido") + "). Me manda esse texto que eu corrijo.");
+  }
 }
 
 // Assim que o simulador abre, já assume a data do dia no computador do parceiro
@@ -901,6 +1182,24 @@ Simulação meramente ilustrativa, válida apenas para o dia ${dataSimulacao}. E
 })();
 
 loadMarcas();
+
+// Se o parceiro girar o celular ou redimensionar a janela, reajusta os números de novo.
+window.addEventListener("resize", ()=>{ if(calculado) ajustarFontesPrazos(); });
+
+// Pré-carrega as marcas de CARRO e MOTO em segundo plano assim que o app abre — mesmo o
+// tipo que o parceiro não está vendo agora já fica salvo no aparelho, pronto pra funcionar
+// offline depois, sem precisar esperar ele clicar em "Moto" pra baixar.
+(function prewarmMarcas(){
+  ["carros","motos"].forEach(t=>{
+    const key = "marcas-"+t;
+    if(cacheMarcas[key]) return;
+    comFallback("marcas", t).then(data=>{
+      cacheMarcas[key] = data;
+    }).catch(()=>{
+      // sem internet ou fonte fora do ar — sem problema, comFallback já cuida do cache local quando precisar
+    });
+  });
+})();
 </script>
 </body>
 </html>
