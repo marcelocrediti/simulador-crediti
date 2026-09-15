@@ -378,6 +378,7 @@ let modelosDisponiveis = [];
 let modelosFiltrados = [];
 let indiceModeloAtivo = -1;
 let nomeModeloSelecionado = "";
+let modeloCodigoSelecionado = "";
 let registroManual = false;
 let avaliacaoManual = false;
 let taxaManual = false;
@@ -662,6 +663,7 @@ function resetBuscaModelos(desabilitar=false){
   modelosFiltrados = [];
   indiceModeloAtivo = -1;
   nomeModeloSelecionado = "";
+  modeloCodigoSelecionado = "";
   $("sel-modelo").value = "";
   $("inp-modelo-busca").value = "";
   $("inp-modelo-busca").disabled = desabilitar;
@@ -695,6 +697,7 @@ function filtrarModelos(valor){
 
   if(nomeModeloSelecionado && valor !== nomeModeloSelecionado){
     nomeModeloSelecionado = "";
+    modeloCodigoSelecionado = "";
     $("sel-modelo").value = "";
     $("sel-ano").innerHTML = '<option value="">Selecione o ano</option>';
     $("sel-ano").disabled = true;
@@ -733,10 +736,11 @@ function fecharSugestoesModelos(){
 
 function selecionarModelo(modelo){
   nomeModeloSelecionado = modelo.nome;
+  modeloCodigoSelecionado = String(modelo.codigo);
   $("inp-modelo-busca").value = modelo.nome;
-  $("sel-modelo").value = modelo.codigo;
+  $("sel-modelo").value = modeloCodigoSelecionado;
   fecharSugestoesModelos();
-  onModeloChange(modelo.codigo);
+  onModeloChange(modeloCodigoSelecionado);
 }
 
 function navegarModelos(evento){
@@ -873,7 +877,7 @@ function onAnoChange(codigo){
   $("fipe-box").style.display="none";
   if(!codigo) return;
   const marcaCodigo = $("sel-marca").value;
-  const modeloCodigo = $("sel-modelo").value;
+  const modeloCodigo = modeloCodigoSelecionado || $("sel-modelo").value;
   const tipoSolicitado = tipo;
   $("loading-msg").style.display="block"; $("loading-msg").textContent="Consultando valor FIPE...";
   comFallback("valor", tipoSolicitado, marcaCodigo, modeloCodigo, codigo).then(data=>{
