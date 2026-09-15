@@ -62,6 +62,20 @@
   }
   select:disabled{opacity:.5;}
   .field{margin-bottom:16px;}
+  .modelo-autocomplete{position:relative;}
+  .modelo-sugestoes{
+    display:none;position:absolute;z-index:20;left:0;right:0;top:calc(100% + 5px);
+    max-height:260px;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    background:#fff;border:1px solid var(--paper-border);border-radius:10px;
+    box-shadow:0 12px 28px rgba(14,42,36,.18);padding:5px;
+  }
+  .modelo-sugestoes.aberta{display:block;}
+  .modelo-opcao{
+    width:100%;border:0;background:#fff;color:var(--ink);text-align:left;
+    padding:11px 12px;border-radius:7px;font-size:14px;line-height:1.25;cursor:pointer;
+  }
+  .modelo-opcao:hover,.modelo-opcao.ativa{background:var(--card-muted);}
+  .modelo-sem-resultado{padding:12px;color:var(--ink-muted);font-size:13px;}
   .fipe-box{background:var(--card-muted);border-radius:12px;padding:12px 14px;margin-bottom:16px;}
   .fipe-model{font-weight:700;}
   .fipe-meta{color:var(--ink-muted);font-size:13px;margin:2px 0 6px;}
@@ -170,7 +184,14 @@
       </div>
       <div class="field">
         <label class="field-label">Modelo / versão</label>
-        <select id="sel-modelo" disabled onchange="onModeloChange(this.value)"><option value="">Selecione o modelo</option></select>
+        <div class="modelo-autocomplete">
+          <input type="text" id="inp-modelo-busca" autocomplete="off" placeholder="Escolha a marca e digite o modelo" disabled
+            oninput="filtrarModelos(this.value)" onfocus="abrirSugestoesModelos()" onkeydown="navegarModelos(event)"
+            role="combobox" aria-autocomplete="list" aria-controls="lista-modelos" aria-expanded="false">
+          <input type="hidden" id="sel-modelo" value="">
+          <div id="lista-modelos" class="modelo-sugestoes" role="listbox"></div>
+        </div>
+        <div class="footnote" style="margin-top:4px;">Digite parte do nome ou da versão e toque no modelo completo.</div>
       </div>
       <div class="field">
         <label class="field-label">Ano modelo (FIPE)</label>
@@ -353,6 +374,10 @@ let cargaId = 0; // trava contra condição de corrida: descarta respostas atras
 let fipeInfo = null;
 let valorFipeOriginal = null;
 let cacheMarcas = {};
+let modelosDisponiveis = [];
+let modelosFiltrados = [];
+let indiceModeloAtivo = -1;
+let nomeModeloSelecionado = "";
 let registroManual = false;
 let avaliacaoManual = false;
 let taxaManual = false;
@@ -565,8 +590,7 @@ function resetPainelResultado(){
 
 function resetSelects(){
   $("sel-marca").innerHTML = '<option value="">Selecione a marca</option>';
-  $("sel-modelo").innerHTML = '<option value="">Selecione o modelo</option>';
-  $("sel-modelo").disabled = true;
+  resetBuscaModelos(true);
   $("sel-ano").innerHTML = '<option value="">Selecione o ano</option>';
   $("sel-ano").disabled = true;
   resetPainelResultado();
@@ -627,26 +651,134 @@ function fillMarcas(data){
   });
 }
 
+function normalizarBusca(texto){
+  return String(texto || "")
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase().trim();
+}
+
+function resetBuscaModelos(desabilitar=false){
+  modelosDisponiveis = [];
+  modelosFiltrados = [];
+  indiceModeloAtivo = -1;
+  nomeModeloSelecionado = "";
+  $("sel-modelo").value = "";
+  $("inp-modelo-busca").value = "";
+  $("inp-modelo-busca").disabled = desabilitar;
+  $("inp-modelo-busca").placeholder = desabilitar ? "Escolha a marca primeiro" : "Digite o modelo ou a versão";
+  fecharSugestoesModelos();
+}
+
+function renderSugestoesModelos(){
+  const lista = $("lista-modelos");
+  lista.innerHTML = "";
+  if(!modelosFiltrados.length){
+    lista.innerHTML = '<div class="modelo-sem-resultado">Nenhum modelo encontrado. Tente outra parte do nome.</div>';
+  }else{
+    modelosFiltrados.forEach((modelo, indice)=>{
+      const botao = document.createElement("button");
+      botao.type = "button";
+      botao.className = "modelo-opcao" + (indice === indiceModeloAtivo ? " ativa" : "");
+      botao.setAttribute("role", "option");
+      botao.setAttribute("aria-selected", indice === indiceModeloAtivo ? "true" : "false");
+      botao.textContent = modelo.nome;
+      botao.onclick = ()=>selecionarModelo(modelo);
+      lista.appendChild(botao);
+    });
+  }
+  lista.classList.add("aberta");
+  $("inp-modelo-busca").setAttribute("aria-expanded", "true");
+}
+
+function filtrarModelos(valor){
+  if($("inp-modelo-busca").disabled) return;
+
+  if(nomeModeloSelecionado && valor !== nomeModeloSelecionado){
+    nomeModeloSelecionado = "";
+    $("sel-modelo").value = "";
+    $("sel-ano").innerHTML = '<option value="">Selecione o ano</option>';
+    $("sel-ano").disabled = true;
+    resetPainelResultado();
+  }
+
+  const termos = normalizarBusca(valor).split(/\s+/).filter(Boolean);
+  modelosFiltrados = modelosDisponiveis
+    .filter(modelo=>{
+      const nome = normalizarBusca(modelo.nome);
+      return termos.every(termo=>nome.includes(termo));
+    })
+    .sort((a,b)=>{
+      const busca = normalizarBusca(valor);
+      const aNome = normalizarBusca(a.nome);
+      const bNome = normalizarBusca(b.nome);
+      const aComeca = busca && aNome.startsWith(busca) ? 0 : 1;
+      const bComeca = busca && bNome.startsWith(busca) ? 0 : 1;
+      return aComeca - bComeca || a.nome.localeCompare(b.nome, "pt-BR");
+    })
+    .slice(0, 60);
+  indiceModeloAtivo = -1;
+  renderSugestoesModelos();
+}
+
+function abrirSugestoesModelos(){
+  if($("inp-modelo-busca").disabled || !modelosDisponiveis.length) return;
+  filtrarModelos($("inp-modelo-busca").value);
+}
+
+function fecharSugestoesModelos(){
+  $("lista-modelos").classList.remove("aberta");
+  $("inp-modelo-busca").setAttribute("aria-expanded", "false");
+  indiceModeloAtivo = -1;
+}
+
+function selecionarModelo(modelo){
+  nomeModeloSelecionado = modelo.nome;
+  $("inp-modelo-busca").value = modelo.nome;
+  $("sel-modelo").value = modelo.codigo;
+  fecharSugestoesModelos();
+  onModeloChange(modelo.codigo);
+}
+
+function navegarModelos(evento){
+  if(evento.key === "Escape"){
+    fecharSugestoesModelos();
+    return;
+  }
+  if(evento.key !== "ArrowDown" && evento.key !== "ArrowUp" && evento.key !== "Enter") return;
+  if(!$("lista-modelos").classList.contains("aberta")) abrirSugestoesModelos();
+  if(!modelosFiltrados.length) return;
+  evento.preventDefault();
+  if(evento.key === "ArrowDown") indiceModeloAtivo = Math.min(indiceModeloAtivo + 1, modelosFiltrados.length - 1);
+  if(evento.key === "ArrowUp") indiceModeloAtivo = Math.max(indiceModeloAtivo - 1, 0);
+  if(evento.key === "Enter"){
+    const escolhido = modelosFiltrados[indiceModeloAtivo >= 0 ? indiceModeloAtivo : 0];
+    selecionarModelo(escolhido);
+    return;
+  }
+  renderSugestoesModelos();
+  const ativo = $("lista-modelos").querySelector(".ativa");
+  if(ativo) ativo.scrollIntoView({block:"nearest"});
+}
+
+document.addEventListener("click", evento=>{
+  if(!evento.target.closest(".modelo-autocomplete")) fecharSugestoesModelos();
+});
+
 function onMarcaChange(codigo){
   hideErr();
   const minhaCarga = ++cargaId;
-  $("sel-modelo").innerHTML = '<option value="">Selecione o modelo</option>';
+  resetBuscaModelos(true);
   $("sel-ano").innerHTML = '<option value="">Selecione o ano</option>';
   $("sel-ano").disabled = true;
   resetPainelResultado();
-  if(!codigo){ $("sel-modelo").disabled = true; return; }
+  if(!codigo) return;
   const tipoSolicitado = tipo;
   $("loading-msg").style.display="block"; $("loading-msg").textContent="Carregando modelos...";
   comFallback("modelos", tipoSolicitado, codigo).then(data=>{
     if(minhaCarga !== cargaId) return; // trocou de marca/tipo antes da resposta chegar — descarta
-    const sel = $("sel-modelo");
-    sel.innerHTML = '<option value="">Selecione o modelo</option>';
-    data.forEach(m=>{
-      const opt = document.createElement("option");
-      opt.value = m.codigo; opt.textContent = m.nome;
-      sel.appendChild(opt);
-    });
-    sel.disabled = false;
+    modelosDisponiveis = data.slice().sort((a,b)=>a.nome.localeCompare(b.nome, "pt-BR"));
+    $("inp-modelo-busca").disabled = false;
+    $("inp-modelo-busca").placeholder = "Digite o modelo ou a versão";
   }).catch(()=>{ if(minhaCarga===cargaId) showErr("A FIPE está indisponível e ainda não há modelos salvos pra essa marca.", ()=>onMarcaChange(codigo)); })
   .finally(()=>{ if(minhaCarga===cargaId) $("loading-msg").style.display="none"; });
 }
